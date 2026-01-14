@@ -11,6 +11,7 @@ from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 from stable_baselines3.common.atari_wrappers import AtariWrapper
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.save_util import load_from_zip_file
 
 # Register ALE environments
 gym.register_envs(ale_py)
@@ -74,49 +75,103 @@ def train_sac(
 
     if pretrained_model and os.path.exists(pretrained_model):
         print(f"Loading pretrained model from {pretrained_model}")
-        model = SAC.load(pretrained_model, env=env)
-        model.set_logger(logger)
 
-        # Handle freeze encoder and reinit head
-        if freeze_encoder or reinit_head:
-            policy = model.policy
+        try:
+            # Try to load the model directly
+            model = SAC.load(pretrained_model, env=env)
+            model.set_logger(logger)
 
-            if reinit_head:
-                print("Reinitializing actor and critic heads")
-                # SAC has actor and critic networks
-                if hasattr(policy, 'actor') and hasattr(policy.actor, 'mu'):
-                    torch.nn.init.orthogonal_(policy.actor.mu.weight, gain=0.01)
-                    torch.nn.init.constant_(policy.actor.mu.bias, 0.0)
-                    if hasattr(policy.actor, 'log_std'):
-                        torch.nn.init.orthogonal_(policy.actor.log_std.weight, gain=0.01)
-                        torch.nn.init.constant_(policy.actor.log_std.bias, 0.0)
+            # Handle freeze encoder and reinit head for same action space
+            if freeze_encoder or reinit_head:
+                policy = model.policy
 
-                # Reinitialize critic networks
-                for critic in [model.critic, model.critic_target]:
-                    if hasattr(critic, 'q_networks'):
-                        for q_net in critic.q_networks:
-                            final_layer = list(q_net.children())[-1]
-                            if isinstance(final_layer, torch.nn.Linear):
-                                torch.nn.init.orthogonal_(final_layer.weight, gain=1)
-                                torch.nn.init.constant_(final_layer.bias, 0.0)
+                if reinit_head:
+                    print("Reinitializing actor and critic heads")
+                    # SAC has actor and critic networks
+                    if hasattr(policy, 'actor') and hasattr(policy.actor, 'mu'):
+                        torch.nn.init.orthogonal_(policy.actor.mu.weight, gain=0.01)
+                        torch.nn.init.constant_(policy.actor.mu.bias, 0.0)
+                        if hasattr(policy.actor, 'log_std'):
+                            torch.nn.init.orthogonal_(policy.actor.log_std.weight, gain=0.01)
+                            torch.nn.init.constant_(policy.actor.log_std.bias, 0.0)
 
-            if freeze_encoder:
-                print("Freezing CNN encoder layers")
-                # Freeze the shared feature extractor (CNN)
-                if hasattr(policy, 'features_extractor'):
-                    for param in policy.features_extractor.parameters():
-                        param.requires_grad = False
+                    # Reinitialize critic networks
+                    for critic in [model.critic, model.critic_target]:
+                        if hasattr(critic, 'q_networks'):
+                            for q_net in critic.q_networks:
+                                final_layer = list(q_net.children())[-1]
+                                if isinstance(final_layer, torch.nn.Linear):
+                                    torch.nn.init.orthogonal_(final_layer.weight, gain=1)
+                                    torch.nn.init.constant_(final_layer.bias, 0.0)
 
-                # Freeze critic feature extractors
-                if hasattr(model.critic, 'features_extractor'):
-                    for param in model.critic.features_extractor.parameters():
-                        param.requires_grad = False
-                if hasattr(model.critic_target, 'features_extractor'):
-                    for param in model.critic_target.features_extractor.parameters():
-                        param.requires_grad = False
+                if freeze_encoder:
+                    print("Freezing CNN encoder layers")
+                    # Freeze the shared feature extractor (CNN)
+                    if hasattr(policy, 'features_extractor'):
+                        for param in policy.features_extractor.parameters():
+                            param.requires_grad = False
 
-                print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
-                print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+                    # Freeze critic feature extractors
+                    if hasattr(model.critic, 'features_extractor'):
+                        for param in model.critic.features_extractor.parameters():
+                            param.requires_grad = False
+                    if hasattr(model.critic_target, 'features_extractor'):
+                        for param in model.critic_target.features_extractor.parameters():
+                            param.requires_grad = False
+
+                    print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                    print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+
+        except ValueError as e:
+            if "Action spaces do not match" in str(e):
+                print(f"Action space mismatch detected: {e}")
+                print("Transferring encoder weights only to new model with correct action space")
+
+                # Load the saved data
+                _, _, pytorch_variables = load_from_zip_file(pretrained_model)
+
+                # Create a new model with the correct action space
+                model = SAC(
+                    "CnnPolicy",
+                    env,
+                    learning_rate=learning_rate,
+                    buffer_size=buffer_size,
+                    learning_starts=learning_starts,
+                    batch_size=batch_size,
+                    tau=tau,
+                    gamma=gamma,
+                    verbose=1,
+                    tensorboard_log=log_dir,
+                )
+                model.set_logger(logger)
+
+                # Transfer encoder weights from pretrained model
+                if pytorch_variables is not None and 'policy' in pytorch_variables:
+                    pretrained_state = pytorch_variables['policy']
+                    current_state = model.policy.state_dict()
+
+                    # Transfer only the CNN feature extractor weights
+                    transferred_keys = []
+                    for key in current_state.keys():
+                        if 'features_extractor' in key and key in pretrained_state:
+                            if current_state[key].shape == pretrained_state[key].shape:
+                                current_state[key] = pretrained_state[key]
+                                transferred_keys.append(key)
+
+                    model.policy.load_state_dict(current_state)
+                    print(f"Transferred {len(transferred_keys)} encoder weight tensors")
+
+                # Freeze encoder if requested
+                if freeze_encoder:
+                    print("Freezing transferred CNN encoder layers")
+                    if hasattr(model.policy, 'features_extractor'):
+                        for param in model.policy.features_extractor.parameters():
+                            param.requires_grad = False
+
+                    print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                    print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+            else:
+                raise
     else:
         model = SAC(
             "CnnPolicy",

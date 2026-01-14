@@ -11,6 +11,7 @@ from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 from stable_baselines3.common.atari_wrappers import AtariWrapper
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.save_util import load_from_zip_file
 
 # Register ALE environments
 gym.register_envs(ale_py)
@@ -69,38 +70,91 @@ def train_ppo(
 
     if pretrained_model and os.path.exists(pretrained_model):
         print(f"Loading pretrained model from {pretrained_model}")
-        model = PPO.load(pretrained_model, env=env)
-        model.set_logger(logger)
 
-        # Handle freeze encoder and reinit head
-        if freeze_encoder or reinit_head:
-            policy = model.policy
+        try:
+            # Try to load the model directly
+            model = PPO.load(pretrained_model, env=env)
+            model.set_logger(logger)
 
-            if reinit_head:
-                print("Reinitializing policy and value heads")
-                # PPO has separate action_net and value_net heads
-                if hasattr(policy, 'action_net'):
-                    torch.nn.init.orthogonal_(policy.action_net.weight, gain=0.01)
-                    torch.nn.init.constant_(policy.action_net.bias, 0.0)
-                if hasattr(policy, 'value_net'):
-                    torch.nn.init.orthogonal_(policy.value_net.weight, gain=1)
-                    torch.nn.init.constant_(policy.value_net.bias, 0.0)
+            # Handle freeze encoder and reinit head for same action space
+            if freeze_encoder or reinit_head:
+                policy = model.policy
 
-            if freeze_encoder:
-                print("Freezing CNN encoder layers")
-                # Freeze the shared feature extractor (CNN)
-                if hasattr(policy, 'features_extractor'):
-                    for param in policy.features_extractor.parameters():
-                        param.requires_grad = False
+                if reinit_head:
+                    print("Reinitializing policy and value heads")
+                    # PPO has separate action_net and value_net heads
+                    if hasattr(policy, 'action_net'):
+                        torch.nn.init.orthogonal_(policy.action_net.weight, gain=0.01)
+                        torch.nn.init.constant_(policy.action_net.bias, 0.0)
+                    if hasattr(policy, 'value_net'):
+                        torch.nn.init.orthogonal_(policy.value_net.weight, gain=1)
+                        torch.nn.init.constant_(policy.value_net.bias, 0.0)
 
-                    # Also freeze the MLP extractor's shared layers if present
-                    if hasattr(policy, 'mlp_extractor'):
-                        if hasattr(policy.mlp_extractor, 'shared_net'):
-                            for param in policy.mlp_extractor.shared_net.parameters():
-                                param.requires_grad = False
+                if freeze_encoder:
+                    print("Freezing CNN encoder layers")
+                    # Freeze the shared feature extractor (CNN)
+                    if hasattr(policy, 'features_extractor'):
+                        for param in policy.features_extractor.parameters():
+                            param.requires_grad = False
 
-                print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
-                print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+                        # Also freeze the MLP extractor's shared layers if present
+                        if hasattr(policy, 'mlp_extractor'):
+                            if hasattr(policy.mlp_extractor, 'shared_net'):
+                                for param in policy.mlp_extractor.shared_net.parameters():
+                                    param.requires_grad = False
+
+                    print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                    print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+
+        except ValueError as e:
+            if "Action spaces do not match" in str(e):
+                print(f"Action space mismatch detected: {e}")
+                print("Transferring encoder weights only to new model with correct action space")
+
+                # Load the saved data
+                _, _, pytorch_variables = load_from_zip_file(pretrained_model)
+
+                # Create a new model with the correct action space
+                model = PPO(
+                    "CnnPolicy",
+                    env,
+                    learning_rate=learning_rate,
+                    n_steps=n_steps,
+                    batch_size=batch_size,
+                    n_epochs=n_epochs,
+                    clip_range=clip_range,
+                    verbose=1,
+                    tensorboard_log=log_dir,
+                )
+                model.set_logger(logger)
+
+                # Transfer encoder weights from pretrained model
+                if pytorch_variables is not None and 'policy' in pytorch_variables:
+                    pretrained_state = pytorch_variables['policy']
+                    current_state = model.policy.state_dict()
+
+                    # Transfer only the CNN feature extractor weights
+                    transferred_keys = []
+                    for key in current_state.keys():
+                        if 'features_extractor' in key and key in pretrained_state:
+                            if current_state[key].shape == pretrained_state[key].shape:
+                                current_state[key] = pretrained_state[key]
+                                transferred_keys.append(key)
+
+                    model.policy.load_state_dict(current_state)
+                    print(f"Transferred {len(transferred_keys)} encoder weight tensors")
+
+                # Freeze encoder if requested
+                if freeze_encoder:
+                    print("Freezing transferred CNN encoder layers")
+                    if hasattr(model.policy, 'features_extractor'):
+                        for param in model.policy.features_extractor.parameters():
+                            param.requires_grad = False
+
+                    print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                    print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+            else:
+                raise
     else:
         model = PPO(
             "CnnPolicy",

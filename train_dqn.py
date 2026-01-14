@@ -11,6 +11,7 @@ from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 from stable_baselines3.common.atari_wrappers import AtariWrapper
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.logger import configure
+from stable_baselines3.common.save_util import load_from_zip_file
 
 # Register ALE environments
 gym.register_envs(ale_py)
@@ -71,48 +72,103 @@ def train_dqn(
 
     if pretrained_model and os.path.exists(pretrained_model):
         print(f"Loading pretrained model from {pretrained_model}")
-        model = DQN.load(pretrained_model, env=env)
-        model.set_logger(logger)
 
-        # Handle freeze encoder and reinit head
-        if freeze_encoder or reinit_head:
-            q_net = model.q_net
-            target_net = model.q_net_target
+        try:
+            # Try to load the model directly
+            model = DQN.load(pretrained_model, env=env)
+            model.set_logger(logger)
 
-            if reinit_head:
-                print("Reinitializing Q-network head (final layer)")
-                # Reinitialize the final linear layer
-                if hasattr(q_net.q_net, 'q_net'):
-                    # Standard DQN has q_net.q_net structure
-                    final_layer = list(q_net.q_net.children())[-1]
-                    if isinstance(final_layer, torch.nn.Linear):
-                        torch.nn.init.orthogonal_(final_layer.weight, gain=1)
-                        torch.nn.init.constant_(final_layer.bias, 0.0)
+            # Handle freeze encoder and reinit head for same action space
+            if freeze_encoder or reinit_head:
+                q_net = model.q_net
+                target_net = model.q_net_target
 
-                    # Do the same for target network
-                    final_layer_target = list(target_net.q_net.children())[-1]
-                    if isinstance(final_layer_target, torch.nn.Linear):
-                        torch.nn.init.orthogonal_(final_layer_target.weight, gain=1)
-                        torch.nn.init.constant_(final_layer_target.bias, 0.0)
+                if reinit_head:
+                    print("Reinitializing Q-network head (final layer)")
+                    # Reinitialize the final linear layer
+                    if hasattr(q_net.q_net, 'q_net'):
+                        # Standard DQN has q_net.q_net structure
+                        final_layer = list(q_net.q_net.children())[-1]
+                        if isinstance(final_layer, torch.nn.Linear):
+                            torch.nn.init.orthogonal_(final_layer.weight, gain=1)
+                            torch.nn.init.constant_(final_layer.bias, 0.0)
 
-            if freeze_encoder:
-                print("Freezing CNN encoder layers")
-                # Freeze all layers except the final linear layer
-                if hasattr(q_net.q_net, 'q_net'):
-                    layers = list(q_net.q_net.children())
-                    # Freeze all but the last layer
-                    for layer in layers[:-1]:
-                        for param in layer.parameters():
+                        # Do the same for target network
+                        final_layer_target = list(target_net.q_net.children())[-1]
+                        if isinstance(final_layer_target, torch.nn.Linear):
+                            torch.nn.init.orthogonal_(final_layer_target.weight, gain=1)
+                            torch.nn.init.constant_(final_layer_target.bias, 0.0)
+
+                if freeze_encoder:
+                    print("Freezing CNN encoder layers")
+                    # Freeze all layers except the final linear layer
+                    if hasattr(q_net.q_net, 'q_net'):
+                        layers = list(q_net.q_net.children())
+                        # Freeze all but the last layer
+                        for layer in layers[:-1]:
+                            for param in layer.parameters():
+                                param.requires_grad = False
+
+                        # Do the same for target network
+                        layers_target = list(target_net.q_net.children())
+                        for layer in layers_target[:-1]:
+                            for param in layer.parameters():
+                                param.requires_grad = False
+
+                    print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                    print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+
+        except ValueError as e:
+            if "Action spaces do not match" in str(e):
+                print(f"Action space mismatch detected: {e}")
+                print("Transferring encoder weights only to new model with correct action space")
+
+                # Load the saved data
+                _, _, pytorch_variables = load_from_zip_file(pretrained_model)
+
+                # Create a new model with the correct action space
+                model = DQN(
+                    "CnnPolicy",
+                    env,
+                    learning_rate=learning_rate,
+                    buffer_size=buffer_size,
+                    learning_starts=learning_starts,
+                    batch_size=batch_size,
+                    target_update_interval=target_update_interval,
+                    exploration_fraction=exploration_fraction,
+                    exploration_final_eps=exploration_final_eps,
+                    verbose=1,
+                    tensorboard_log=log_dir,
+                )
+                model.set_logger(logger)
+
+                # Transfer encoder weights from pretrained model
+                if pytorch_variables is not None and 'policy' in pytorch_variables:
+                    pretrained_state = pytorch_variables['policy']
+                    current_state = model.policy.state_dict()
+
+                    # Transfer only the CNN feature extractor weights
+                    transferred_keys = []
+                    for key in current_state.keys():
+                        if 'features_extractor' in key and key in pretrained_state:
+                            if current_state[key].shape == pretrained_state[key].shape:
+                                current_state[key] = pretrained_state[key]
+                                transferred_keys.append(key)
+
+                    model.policy.load_state_dict(current_state)
+                    print(f"Transferred {len(transferred_keys)} encoder weight tensors")
+
+                # Freeze encoder if requested
+                if freeze_encoder:
+                    print("Freezing transferred CNN encoder layers")
+                    if hasattr(model.policy, 'features_extractor'):
+                        for param in model.policy.features_extractor.parameters():
                             param.requires_grad = False
 
-                    # Do the same for target network
-                    layers_target = list(target_net.q_net.children())
-                    for layer in layers_target[:-1]:
-                        for param in layer.parameters():
-                            param.requires_grad = False
-
-                print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
-                print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+                    print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                    print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
+            else:
+                raise
     else:
         model = DQN(
             "CnnPolicy",
