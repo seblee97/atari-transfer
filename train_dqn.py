@@ -4,11 +4,15 @@ import os
 from pathlib import Path
 
 import gymnasium as gym
+import ale_py
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 from stable_baselines3.common.atari_wrappers import AtariWrapper
 from stable_baselines3.common.callbacks import CheckpointCallback, EvalCallback
 from stable_baselines3.common.logger import configure
+
+# Register ALE environments
+gym.register_envs(ale_py)
 
 def make_atari_env(game_name):
     def _init():
