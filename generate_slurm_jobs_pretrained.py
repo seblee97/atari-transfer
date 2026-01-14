@@ -27,6 +27,7 @@ def create_slurm_script_pretrained(
     cpus=4,
     gpus=1,
     conda_env=None,
+    venv_path=None,
     freeze_encoder=False,
     reinit_head=False,
 ):
@@ -50,7 +51,12 @@ echo "Job ID: $SLURM_JOB_ID"
 cd $SLURM_SUBMIT_DIR
 """
 
-    if conda_env:
+    if venv_path:
+        script_content += f"""
+# Activate virtual environment
+source {venv_path}/bin/activate
+"""
+    elif conda_env:
         script_content += f"""
 # Activate conda environment
 source $(conda info --base)/etc/profile.d/conda.sh
@@ -140,6 +146,7 @@ def generate_all_jobs_pretrained(
     cpus=4,
     gpus=1,
     conda_env=None,
+    venv_path=None,
     freeze_encoder=False,
     reinit_head=False,
 ):
@@ -175,6 +182,7 @@ def generate_all_jobs_pretrained(
                     cpus=cpus,
                     gpus=gpus,
                     conda_env=conda_env,
+                    venv_path=venv_path,
                     freeze_encoder=freeze_encoder,
                     reinit_head=reinit_head,
                 )
@@ -209,7 +217,9 @@ def generate_all_jobs_pretrained(
         f.write("#!/bin/bash\n")
         f.write("# Pre-download all models before submitting jobs\n\n")
 
-        if conda_env:
+        if venv_path:
+            f.write(f"source {venv_path}/bin/activate\n\n")
+        elif conda_env:
             f.write(f"source $(conda info --base)/etc/profile.d/conda.sh\n")
             f.write(f"conda activate {conda_env}\n\n")
 
@@ -288,6 +298,8 @@ if __name__ == "__main__":
                        help="GPUs per task")
     parser.add_argument("--conda-env", type=str, default=None,
                        help="Conda environment name to activate")
+    parser.add_argument("--venv-path", type=str, default=None,
+                       help="Path to virtual environment (e.g., /path/to/venv)")
     parser.add_argument("--freeze-encoder", action="store_true",
                        help="Freeze CNN encoder during target game training")
     parser.add_argument("--reinit-head", action="store_true",
@@ -326,6 +338,8 @@ if __name__ == "__main__":
                 args.gpus = slurm_config.get("gpus", 1)
             if args.conda_env is None:
                 args.conda_env = slurm_config.get("conda_env")
+            if args.venv_path is None:
+                args.venv_path = slurm_config.get("venv_path")
 
         if "algorithms" in config and args.algorithms is None:
             # Filter to only algorithms with pre-trained models available
@@ -376,6 +390,7 @@ if __name__ == "__main__":
         cpus=args.cpus,
         gpus=args.gpus,
         conda_env=args.conda_env,
+        venv_path=args.venv_path,
         freeze_encoder=args.freeze_encoder,
         reinit_head=args.reinit_head,
     )
