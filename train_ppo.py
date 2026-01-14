@@ -5,6 +5,7 @@ from pathlib import Path
 
 import gymnasium as gym
 import ale_py
+import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 from stable_baselines3.common.atari_wrappers import AtariWrapper
@@ -34,6 +35,8 @@ def train_ppo(
     batch_size=256,
     n_epochs=4,
     clip_range=0.1,
+    freeze_encoder=False,
+    reinit_head=False,
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
@@ -68,6 +71,36 @@ def train_ppo(
         print(f"Loading pretrained model from {pretrained_model}")
         model = PPO.load(pretrained_model, env=env)
         model.set_logger(logger)
+
+        # Handle freeze encoder and reinit head
+        if freeze_encoder or reinit_head:
+            policy = model.policy
+
+            if reinit_head:
+                print("Reinitializing policy and value heads")
+                # PPO has separate action_net and value_net heads
+                if hasattr(policy, 'action_net'):
+                    torch.nn.init.orthogonal_(policy.action_net.weight, gain=0.01)
+                    torch.nn.init.constant_(policy.action_net.bias, 0.0)
+                if hasattr(policy, 'value_net'):
+                    torch.nn.init.orthogonal_(policy.value_net.weight, gain=1)
+                    torch.nn.init.constant_(policy.value_net.bias, 0.0)
+
+            if freeze_encoder:
+                print("Freezing CNN encoder layers")
+                # Freeze the shared feature extractor (CNN)
+                if hasattr(policy, 'features_extractor'):
+                    for param in policy.features_extractor.parameters():
+                        param.requires_grad = False
+
+                    # Also freeze the MLP extractor's shared layers if present
+                    if hasattr(policy, 'mlp_extractor'):
+                        if hasattr(policy.mlp_extractor, 'shared_net'):
+                            for param in policy.mlp_extractor.shared_net.parameters():
+                                param.requires_grad = False
+
+                print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
     else:
         model = PPO(
             "CnnPolicy",
@@ -111,6 +144,8 @@ if __name__ == "__main__":
     parser.add_argument("--lr", type=float, default=2.5e-4, help="Learning rate")
     parser.add_argument("--n-steps", type=int, default=128, help="Number of steps per update")
     parser.add_argument("--batch-size", type=int, default=256, help="Batch size")
+    parser.add_argument("--freeze-encoder", action="store_true", help="Freeze CNN encoder layers during transfer")
+    parser.add_argument("--reinit-head", action="store_true", help="Reinitialize the policy and value head weights")
 
     args = parser.parse_args()
 
@@ -125,4 +160,6 @@ if __name__ == "__main__":
         learning_rate=args.lr,
         n_steps=args.n_steps,
         batch_size=args.batch_size,
+        freeze_encoder=args.freeze_encoder,
+        reinit_head=args.reinit_head,
     )

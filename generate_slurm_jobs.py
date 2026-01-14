@@ -18,6 +18,8 @@ def generate_slurm_script(
     cpus=4,
     gpus=1,
     conda_env=None,
+    freeze_encoder=False,
+    reinit_head=False,
 ):
     script_content = f"""#!/bin/bash
 #SBATCH --job-name={job_name}
@@ -53,7 +55,14 @@ python transfer_learning.py \\
     --target-game {target_game} \\
     --source-timesteps {source_timesteps} \\
     --target-timesteps {target_timesteps} \\
-    --output-dir {output_dir}
+    --output-dir {output_dir}"""
+
+    if freeze_encoder:
+        script_content += " \\\n    --freeze-encoder"
+    if reinit_head:
+        script_content += " \\\n    --reinit-head"
+
+    script_content += """
 
 echo "Job completed: $(date)"
 """
@@ -72,6 +81,8 @@ def generate_all_jobs(
     cpus=4,
     gpus=1,
     conda_env=None,
+    freeze_encoder=False,
+    reinit_head=False,
 ):
     os.makedirs(output_dir, exist_ok=True)
     scripts_dir = os.path.join(output_dir, "slurm_scripts")
@@ -107,6 +118,8 @@ def generate_all_jobs(
                     cpus=cpus,
                     gpus=gpus,
                     conda_env=conda_env,
+                    freeze_encoder=freeze_encoder,
+                    reinit_head=reinit_head,
                 )
 
                 with open(script_path, "w") as f:
@@ -159,7 +172,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", type=str, help="JSON config file with games list")
     parser.add_argument("--games", type=str, nargs="+", help="List of Atari games (e.g., Pong Breakout SpaceInvaders)")
     parser.add_argument("--algorithms", type=str, nargs="+", default=["dqn", "ppo"],
-                        choices=["dqn", "ppo"], help="RL algorithms to use")
+                        choices=["dqn", "ppo", "sac", "qrdqn"], help="RL algorithms to use")
     parser.add_argument("--source-timesteps", type=int, default=1000000,
                         help="Training timesteps for source game")
     parser.add_argument("--target-timesteps", type=int, default=1000000,
@@ -178,6 +191,10 @@ if __name__ == "__main__":
                         help="GPUs per task")
     parser.add_argument("--conda-env", type=str, default=None,
                         help="Conda environment name to activate")
+    parser.add_argument("--freeze-encoder", action="store_true",
+                        help="Freeze CNN encoder during target game training")
+    parser.add_argument("--reinit-head", action="store_true",
+                        help="Reinitialize head layers before target game training")
 
     args = parser.parse_args()
 
@@ -185,6 +202,28 @@ if __name__ == "__main__":
         with open(args.config, "r") as f:
             config = json.load(f)
         games = config.get("games", [])
+
+        # Load additional config values if not specified via command line
+        if "training" in config:
+            training_config = config["training"]
+            if not args.freeze_encoder and "freeze_encoder" in training_config:
+                args.freeze_encoder = training_config["freeze_encoder"]
+            if not args.reinit_head and "reinit_head" in training_config:
+                args.reinit_head = training_config["reinit_head"]
+            if not args.source_timesteps and "source_timesteps" in training_config:
+                args.source_timesteps = training_config["source_timesteps"]
+            if not args.target_timesteps and "target_timesteps" in training_config:
+                args.target_timesteps = training_config["target_timesteps"]
+
+        if "slurm" in config:
+            slurm_config = config["slurm"]
+            if not args.partition and "partition" in slurm_config:
+                args.partition = slurm_config["partition"]
+            if not args.conda_env and "conda_env" in slurm_config:
+                args.conda_env = slurm_config["conda_env"]
+
+        if "algorithms" in config:
+            args.algorithms = config["algorithms"]
     elif args.games:
         games = args.games
     else:
@@ -207,4 +246,6 @@ if __name__ == "__main__":
         cpus=args.cpus,
         gpus=args.gpus,
         conda_env=args.conda_env,
+        freeze_encoder=args.freeze_encoder,
+        reinit_head=args.reinit_head,
     )

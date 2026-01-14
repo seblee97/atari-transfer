@@ -5,6 +5,7 @@ from pathlib import Path
 
 import gymnasium as gym
 import ale_py
+import torch
 from stable_baselines3 import DQN
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
 from stable_baselines3.common.atari_wrappers import AtariWrapper
@@ -36,6 +37,8 @@ def train_dqn(
     target_update_interval=1000,
     exploration_fraction=0.1,
     exploration_final_eps=0.01,
+    freeze_encoder=False,
+    reinit_head=False,
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
@@ -70,6 +73,46 @@ def train_dqn(
         print(f"Loading pretrained model from {pretrained_model}")
         model = DQN.load(pretrained_model, env=env)
         model.set_logger(logger)
+
+        # Handle freeze encoder and reinit head
+        if freeze_encoder or reinit_head:
+            q_net = model.q_net
+            target_net = model.q_net_target
+
+            if reinit_head:
+                print("Reinitializing Q-network head (final layer)")
+                # Reinitialize the final linear layer
+                if hasattr(q_net.q_net, 'q_net'):
+                    # Standard DQN has q_net.q_net structure
+                    final_layer = list(q_net.q_net.children())[-1]
+                    if isinstance(final_layer, torch.nn.Linear):
+                        torch.nn.init.orthogonal_(final_layer.weight, gain=1)
+                        torch.nn.init.constant_(final_layer.bias, 0.0)
+
+                    # Do the same for target network
+                    final_layer_target = list(target_net.q_net.children())[-1]
+                    if isinstance(final_layer_target, torch.nn.Linear):
+                        torch.nn.init.orthogonal_(final_layer_target.weight, gain=1)
+                        torch.nn.init.constant_(final_layer_target.bias, 0.0)
+
+            if freeze_encoder:
+                print("Freezing CNN encoder layers")
+                # Freeze all layers except the final linear layer
+                if hasattr(q_net.q_net, 'q_net'):
+                    layers = list(q_net.q_net.children())
+                    # Freeze all but the last layer
+                    for layer in layers[:-1]:
+                        for param in layer.parameters():
+                            param.requires_grad = False
+
+                    # Do the same for target network
+                    layers_target = list(target_net.q_net.children())
+                    for layer in layers_target[:-1]:
+                        for param in layer.parameters():
+                            param.requires_grad = False
+
+                print(f"Trainable parameters: {sum(p.numel() for p in model.policy.parameters() if p.requires_grad)}")
+                print(f"Frozen parameters: {sum(p.numel() for p in model.policy.parameters() if not p.requires_grad)}")
     else:
         model = DQN(
             "CnnPolicy",
@@ -114,6 +157,8 @@ if __name__ == "__main__":
     parser.add_argument("--eval-freq", type=int, default=10000, help="Evaluation frequency")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--buffer-size", type=int, default=100000, help="Replay buffer size")
+    parser.add_argument("--freeze-encoder", action="store_true", help="Freeze CNN encoder layers during transfer")
+    parser.add_argument("--reinit-head", action="store_true", help="Reinitialize the final layer weights")
 
     args = parser.parse_args()
 
@@ -127,4 +172,6 @@ if __name__ == "__main__":
         eval_freq=args.eval_freq,
         learning_rate=args.lr,
         buffer_size=args.buffer_size,
+        freeze_encoder=args.freeze_encoder,
+        reinit_head=args.reinit_head,
     )

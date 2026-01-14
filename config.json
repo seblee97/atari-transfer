@@ -7,13 +7,16 @@
   ],
   "algorithms": [
     "dqn",
-    "ppo"
+    "ppo",
+    "qrdqn"
   ],
   "training": {
     "source_timesteps": 1000000,
     "target_timesteps": 1000000,
     "checkpoint_freq": 50000,
-    "eval_freq": 10000
+    "eval_freq": 10000,
+    "freeze_encoder": false,
+    "reinit_head": false
   },
   "slurm": {
     "partition": "gpu",

@@ -4,8 +4,8 @@ A simple, clean codebase for training deep reinforcement learning models (DQN an
 
 ## Features
 
-- DQN and PPO implementations using Stable-Baselines3
-- Transfer learning between Atari game pairs
+- Multiple RL algorithms: DQN, PPO, SAC, and QR-DQN implementations using Stable-Baselines3
+- Transfer learning between Atari game pairs with freeze encoder + reinitialize head support
 - Automatic checkpointing and comprehensive logging
 - SLURM job generation for parallel cluster execution
 - TensorBoard integration for monitoring
@@ -31,6 +31,8 @@ pip install -r requirements.txt
 atari-transfer-rl/
 ├── train_dqn.py              # DQN training script
 ├── train_ppo.py              # PPO training script
+├── train_sac.py              # SAC training script
+├── train_qrdqn.py            # QR-DQN training script
 ├── transfer_learning.py      # Transfer learning wrapper
 ├── generate_slurm_jobs.py    # SLURM job generator
 ├── config.json               # Configuration file
@@ -54,6 +56,16 @@ Train PPO on a single game:
 python train_ppo.py --game Breakout --timesteps 1000000
 ```
 
+Train SAC on a single game:
+```bash
+python train_sac.py --game SpaceInvaders --timesteps 1000000
+```
+
+Train QR-DQN on a single game:
+```bash
+python train_qrdqn.py --game Tennis --timesteps 1000000
+```
+
 ### 2. Transfer Learning
 
 Train on a source game, then transfer to a target game:
@@ -66,12 +78,39 @@ python transfer_learning.py \
     --target-timesteps 1000000
 ```
 
+**NEW: Freeze Encoder Transfer Learning**
+
+Train with frozen encoder and reinitialized head (recommended for better transfer):
+```bash
+python transfer_learning.py \
+    --algorithm dqn \
+    --source-game Pong \
+    --target-game Breakout \
+    --source-timesteps 1000000 \
+    --target-timesteps 1000000 \
+    --freeze-encoder \
+    --reinit-head
+```
+
+This approach:
+- Freezes the CNN encoder layers trained on the source game
+- Reinitializes the policy/value head with fresh weights
+- Only trains the head on the target game
+- Often leads to better transfer performance and faster convergence
+
 ### 3. Batch Experiments with SLURM
 
-Edit [config.json](config.json) to specify your games list:
+Edit [config.json](config.json) to specify your games list and transfer settings:
 ```json
 {
-  "games": ["Pong", "Breakout", "SpaceInvaders", "Qbert"]
+  "games": ["Pong", "Breakout", "SpaceInvaders", "Tennis"],
+  "algorithms": ["dqn", "ppo", "sac", "qrdqn"],
+  "training": {
+    "source_timesteps": 1000000,
+    "target_timesteps": 1000000,
+    "freeze_encoder": true,
+    "reinit_head": true
+  }
 }
 ```
 
@@ -83,8 +122,8 @@ python generate_slurm_jobs.py --config config.json
 Or specify games directly:
 ```bash
 python generate_slurm_jobs.py \
-    --games Pong Breakout SpaceInvaders \
-    --algorithms dqn ppo \
+    --games Pong Breakout SpaceInvaders Tennis \
+    --algorithms dqn ppo sac qrdqn \
     --partition gpu \
     --time-limit 24:00:00 \
     --mem 32G \
@@ -112,11 +151,30 @@ DQN parameters (train_dqn.py):
 - `--buffer-size`: Replay buffer size (default: 100000)
 - `--checkpoint-freq`: Steps between checkpoints (default: 50000)
 - `--eval-freq`: Steps between evaluations (default: 10000)
+- `--freeze-encoder`: Freeze CNN encoder layers during transfer (flag)
+- `--reinit-head`: Reinitialize final layer weights before transfer (flag)
 
 PPO parameters (train_ppo.py):
 - `--lr`: Learning rate (default: 2.5e-4)
 - `--n-steps`: Steps per update (default: 128)
 - `--batch-size`: Batch size (default: 256)
+- `--freeze-encoder`: Freeze CNN encoder layers during transfer (flag)
+- `--reinit-head`: Reinitialize policy/value heads before transfer (flag)
+
+SAC parameters (train_sac.py):
+- `--lr`: Learning rate (default: 3e-4)
+- `--buffer-size`: Replay buffer size (default: 100000)
+- `--tau`: Target network update rate (default: 0.005)
+- `--gamma`: Discount factor (default: 0.99)
+- `--freeze-encoder`: Freeze CNN encoder layers during transfer (flag)
+- `--reinit-head`: Reinitialize actor/critic heads before transfer (flag)
+
+QR-DQN parameters (train_qrdqn.py):
+- `--lr`: Learning rate (default: 1e-4)
+- `--buffer-size`: Replay buffer size (default: 100000)
+- `--n-quantiles`: Number of quantiles for distributional RL (default: 200)
+- `--freeze-encoder`: Freeze CNN encoder layers during transfer (flag)
+- `--reinit-head`: Reinitialize quantile head before transfer (flag)
 
 ### SLURM Configuration
 
@@ -225,11 +283,38 @@ squeue -u $USER
 tensorboard --logdir results/
 ```
 
+## Algorithm Comparison
+
+**DQN (Deep Q-Network)**
+- Off-policy value-based algorithm
+- Uses experience replay and target networks
+- Good for discrete action spaces
+- Memory efficient with replay buffer
+
+**PPO (Proximal Policy Optimization)**
+- On-policy policy gradient algorithm
+- Clipped surrogate objective for stable updates
+- Generally more sample efficient than vanilla policy gradient
+- Good balance of performance and stability
+
+**SAC (Soft Actor-Critic)**
+- Off-policy actor-critic algorithm
+- Maximum entropy framework for exploration
+- Supports both continuous and discrete action spaces
+- Robust to hyperparameters
+- Note: Standard SAC is designed for continuous actions; for Atari you may want to use discrete action variants or stick with DQN/PPO/QR-DQN
+
+**QR-DQN (Quantile Regression DQN)**
+- Distributional RL extension of DQN
+- Models full distribution of returns instead of just expectation
+- Uses quantile regression for better value estimation
+- Often outperforms standard DQN
+
 ## Notes
 
 - Each pairwise combination is run in both directions (A→B and B→A)
 - For N games, this generates 2 × N × (N-1) experiments per algorithm
-- Default: 6 games × 2 algorithms = 60 total experiments
+- Default: 4 games × 4 algorithms = 96 total experiments
 - Checkpoint frequency balances storage and recovery capability
 - Evaluation runs every `eval_freq` steps with 5 episodes
 
@@ -242,3 +327,7 @@ tensorboard --logdir results/
 **Missing ROMs**: The `accept-rom-license` flag in requirements.txt auto-downloads ROMs. If issues persist, manually install: `pip install "gymnasium[accept-rom-license]"`
 
 **SLURM job failures**: Check `results/slurm_logs/` for error messages
+
+**SAC with discrete actions**: SAC is designed for continuous action spaces. For Atari (discrete actions), DQN, PPO, or QR-DQN are recommended. The SAC implementation is provided for completeness but may require modifications for optimal performance on discrete action environments.
+
+**QR-DQN requirements**: QR-DQN requires `sb3-contrib` package, which is included in requirements.txt

@@ -14,6 +14,8 @@ def run_transfer_learning(
     output_dir,
     checkpoint_freq=50000,
     eval_freq=10000,
+    freeze_encoder=False,
+    reinit_head=False,
 ):
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_name = f"{algorithm}_{source_game}_to_{target_game}_{timestamp}"
@@ -35,6 +37,8 @@ def run_transfer_learning(
         "checkpoint_freq": checkpoint_freq,
         "eval_freq": eval_freq,
         "experiment_name": experiment_name,
+        "freeze_encoder": freeze_encoder,
+        "reinit_head": reinit_head,
     }
 
     config_path = os.path.join(experiment_dir, "config.json")
@@ -88,6 +92,11 @@ def run_transfer_learning(
         f"--eval-freq {eval_freq}"
     )
 
+    if freeze_encoder:
+        target_cmd += " --freeze-encoder"
+    if reinit_head:
+        target_cmd += " --reinit-head"
+
     print(f"Running: {target_cmd}")
     target_result = os.system(target_cmd)
 
@@ -116,7 +125,7 @@ def run_transfer_learning(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Transfer learning between two Atari games")
-    parser.add_argument("--algorithm", type=str, required=True, choices=["dqn", "ppo"],
+    parser.add_argument("--algorithm", type=str, required=True, choices=["dqn", "ppo", "sac", "qrdqn"],
                         help="RL algorithm to use")
     parser.add_argument("--source-game", type=str, required=True,
                         help="Source game name (e.g., Pong, Breakout)")
@@ -132,6 +141,10 @@ if __name__ == "__main__":
                         help="Checkpoint frequency")
     parser.add_argument("--eval-freq", type=int, default=10000,
                         help="Evaluation frequency")
+    parser.add_argument("--freeze-encoder", action="store_true",
+                        help="Freeze CNN encoder during target game training")
+    parser.add_argument("--reinit-head", action="store_true",
+                        help="Reinitialize head layers before target game training")
 
     args = parser.parse_args()
 
@@ -144,4 +157,6 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         checkpoint_freq=args.checkpoint_freq,
         eval_freq=args.eval_freq,
+        freeze_encoder=args.freeze_encoder,
+        reinit_head=args.reinit_head,
     )
