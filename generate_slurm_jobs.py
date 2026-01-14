@@ -171,23 +171,23 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate SLURM job scripts for transfer learning experiments")
     parser.add_argument("--config", type=str, help="JSON config file with games list")
     parser.add_argument("--games", type=str, nargs="+", help="List of Atari games (e.g., Pong Breakout SpaceInvaders)")
-    parser.add_argument("--algorithms", type=str, nargs="+", default=["dqn", "ppo"],
+    parser.add_argument("--algorithms", type=str, nargs="+", default=None,
                         choices=["dqn", "ppo", "sac", "qrdqn"], help="RL algorithms to use")
-    parser.add_argument("--source-timesteps", type=int, default=1000000,
+    parser.add_argument("--source-timesteps", type=int, default=None,
                         help="Training timesteps for source game")
-    parser.add_argument("--target-timesteps", type=int, default=1000000,
+    parser.add_argument("--target-timesteps", type=int, default=None,
                         help="Training timesteps for target game")
     parser.add_argument("--output-dir", type=str, default="results",
                         help="Output directory for experiments")
-    parser.add_argument("--partition", type=str, default="gpu",
+    parser.add_argument("--partition", type=str, default=None,
                         help="SLURM partition")
-    parser.add_argument("--time-limit", type=str, default="24:00:00",
+    parser.add_argument("--time-limit", type=str, default=None,
                         help="Time limit per job (HH:MM:SS)")
-    parser.add_argument("--mem", type=str, default="32G",
+    parser.add_argument("--mem", type=str, default=None,
                         help="Memory per job")
-    parser.add_argument("--cpus", type=int, default=4,
+    parser.add_argument("--cpus", type=int, default=None,
                         help="CPUs per task")
-    parser.add_argument("--gpus", type=int, default=1,
+    parser.add_argument("--gpus", type=int, default=None,
                         help="GPUs per task")
     parser.add_argument("--conda-env", type=str, default=None,
                         help="Conda environment name to activate")
@@ -198,37 +198,65 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    # Set defaults for config-based parameters
     if args.config:
         with open(args.config, "r") as f:
             config = json.load(f)
         games = config.get("games", [])
 
-        # Load additional config values if not specified via command line
+        # Load config values, allowing command-line to override
         if "training" in config:
             training_config = config["training"]
-            if not args.freeze_encoder and "freeze_encoder" in training_config:
-                args.freeze_encoder = training_config["freeze_encoder"]
-            if not args.reinit_head and "reinit_head" in training_config:
-                args.reinit_head = training_config["reinit_head"]
-            if not args.source_timesteps and "source_timesteps" in training_config:
-                args.source_timesteps = training_config["source_timesteps"]
-            if not args.target_timesteps and "target_timesteps" in training_config:
-                args.target_timesteps = training_config["target_timesteps"]
+            if args.source_timesteps is None:
+                args.source_timesteps = training_config.get("source_timesteps", 1000000)
+            if args.target_timesteps is None:
+                args.target_timesteps = training_config.get("target_timesteps", 1000000)
+            # For boolean flags, only override if not set on command line
+            if not args.freeze_encoder:
+                args.freeze_encoder = training_config.get("freeze_encoder", False)
+            if not args.reinit_head:
+                args.reinit_head = training_config.get("reinit_head", False)
 
         if "slurm" in config:
             slurm_config = config["slurm"]
-            if not args.partition and "partition" in slurm_config:
-                args.partition = slurm_config["partition"]
-            if not args.conda_env and "conda_env" in slurm_config:
-                args.conda_env = slurm_config["conda_env"]
+            if args.partition is None:
+                args.partition = slurm_config.get("partition", "gpu")
+            if args.time_limit is None:
+                args.time_limit = slurm_config.get("time_limit", "24:00:00")
+            if args.mem is None:
+                args.mem = slurm_config.get("mem", "32G")
+            if args.cpus is None:
+                args.cpus = slurm_config.get("cpus", 4)
+            if args.gpus is None:
+                args.gpus = slurm_config.get("gpus", 1)
+            if args.conda_env is None:
+                args.conda_env = slurm_config.get("conda_env")
 
-        if "algorithms" in config:
+        if "algorithms" in config and args.algorithms is None:
             args.algorithms = config["algorithms"]
     elif args.games:
         games = args.games
     else:
         print("Error: Must provide either --config or --games")
         exit(1)
+
+    # Apply final defaults for any parameters still None
+    if args.algorithms is None:
+        args.algorithms = ["dqn", "ppo"]
+    if args.source_timesteps is None:
+        args.source_timesteps = 1000000
+    if args.target_timesteps is None:
+        args.target_timesteps = 1000000
+    if args.partition is None:
+        args.partition = "gpu"
+    if args.time_limit is None:
+        args.time_limit = "24:00:00"
+    if args.mem is None:
+        args.mem = "32G"
+    if args.cpus is None:
+        args.cpus = 4
+    if args.gpus is None:
+        args.gpus = 1
 
     if len(games) < 2:
         print("Error: Need at least 2 games for pairwise transfer learning")
