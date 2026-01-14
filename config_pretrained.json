@@ -1,0 +1,30 @@
+{
+  "games": [
+    "Pong",
+    "Breakout",
+    "SpaceInvaders"
+  ],
+  "algorithms": [
+    "dqn",
+    "ppo"
+  ],
+  "training": {
+    "target_timesteps": 1000000,
+    "freeze_encoder": true,
+    "reinit_head": true
+  },
+  "slurm": {
+    "partition": "gpu",
+    "time_limit": "12:00:00",
+    "mem": "32G",
+    "cpus": 4,
+    "gpus": 1,
+    "conda_env": "atari-rl"
+  },
+  "notes": {
+    "description": "Transfer learning experiments using pre-trained models from RL Baselines3 Zoo",
+    "time_savings": "50% faster than training from scratch - only target training needed",
+    "games_note": "Tennis not included as it's not available in the zoo - train separately if needed",
+    "algorithms_note": "Only DQN, PPO, and QR-DQN have pre-trained models available"
+  }
+}
