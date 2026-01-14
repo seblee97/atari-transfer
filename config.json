@@ -1,0 +1,26 @@
+{
+  "games": [
+    "Pong",
+    "Breakout",
+    "SpaceInvaders",
+    "Tennis"
+  ],
+  "algorithms": [
+    "dqn",
+    "ppo"
+  ],
+  "training": {
+    "source_timesteps": 1000000,
+    "target_timesteps": 1000000,
+    "checkpoint_freq": 50000,
+    "eval_freq": 10000
+  },
+  "slurm": {
+    "partition": "gpu",
+    "time_limit": "24:00:00",
+    "mem": "32G",
+    "cpus": 4,
+    "gpus": 1,
+    "conda_env": "atari-rl"
+  }
+}

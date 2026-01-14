@@ -1,0 +1,210 @@
+#!/usr/bin/env python3
+import argparse
+import os
+import json
+from itertools import combinations
+
+def generate_slurm_script(
+    job_name,
+    algorithm,
+    source_game,
+    target_game,
+    source_timesteps,
+    target_timesteps,
+    output_dir,
+    partition="gpu",
+    time_limit="24:00:00",
+    mem="32G",
+    cpus=4,
+    gpus=1,
+    conda_env=None,
+):
+    script_content = f"""#!/bin/bash
+#SBATCH --job-name={job_name}
+#SBATCH --output={output_dir}/slurm_logs/{job_name}_%j.out
+#SBATCH --error={output_dir}/slurm_logs/{job_name}_%j.err
+#SBATCH --partition={partition}
+#SBATCH --time={time_limit}
+#SBATCH --mem={mem}
+#SBATCH --cpus-per-task={cpus}
+#SBATCH --gres=gpu:{gpus}
+
+echo "Starting job: {job_name}"
+echo "Node: $(hostname)"
+echo "Date: $(date)"
+echo "Algorithm: {algorithm}"
+echo "Source game: {source_game}"
+echo "Target game: {target_game}"
+
+"""
+
+    if conda_env:
+        script_content += f"""
+# Activate conda environment
+source $(conda info --base)/etc/profile.d/conda.sh
+conda activate {conda_env}
+"""
+
+    script_content += f"""
+# Run transfer learning
+python transfer_learning.py \\
+    --algorithm {algorithm} \\
+    --source-game {source_game} \\
+    --target-game {target_game} \\
+    --source-timesteps {source_timesteps} \\
+    --target-timesteps {target_timesteps} \\
+    --output-dir {output_dir}
+
+echo "Job completed: $(date)"
+"""
+
+    return script_content
+
+def generate_all_jobs(
+    games,
+    algorithms,
+    source_timesteps,
+    target_timesteps,
+    output_dir,
+    partition="gpu",
+    time_limit="24:00:00",
+    mem="32G",
+    cpus=4,
+    gpus=1,
+    conda_env=None,
+):
+    os.makedirs(output_dir, exist_ok=True)
+    scripts_dir = os.path.join(output_dir, "slurm_scripts")
+    os.makedirs(scripts_dir, exist_ok=True)
+    os.makedirs(os.path.join(output_dir, "slurm_logs"), exist_ok=True)
+
+    game_pairs = list(combinations(games, 2))
+
+    all_jobs = []
+
+    for algorithm in algorithms:
+        for source_game, target_game in game_pairs:
+            for direction in [True, False]:
+                if direction:
+                    src, tgt = source_game, target_game
+                else:
+                    src, tgt = target_game, source_game
+
+                job_name = f"{algorithm}_{src}_to_{tgt}"
+                script_path = os.path.join(scripts_dir, f"{job_name}.sh")
+
+                script_content = generate_slurm_script(
+                    job_name=job_name,
+                    algorithm=algorithm,
+                    source_game=src,
+                    target_game=tgt,
+                    source_timesteps=source_timesteps,
+                    target_timesteps=target_timesteps,
+                    output_dir=output_dir,
+                    partition=partition,
+                    time_limit=time_limit,
+                    mem=mem,
+                    cpus=cpus,
+                    gpus=gpus,
+                    conda_env=conda_env,
+                )
+
+                with open(script_path, "w") as f:
+                    f.write(script_content)
+
+                os.chmod(script_path, 0o755)
+
+                all_jobs.append({
+                    "job_name": job_name,
+                    "script_path": script_path,
+                    "algorithm": algorithm,
+                    "source_game": src,
+                    "target_game": tgt,
+                })
+
+                print(f"Generated: {script_path}")
+
+    submit_script_path = os.path.join(scripts_dir, "submit_all.sh")
+    with open(submit_script_path, "w") as f:
+        f.write("#!/bin/bash\n\n")
+        f.write("# Submit all SLURM jobs\n\n")
+        for job in all_jobs:
+            f.write(f"sbatch {job['script_path']}\n")
+
+    os.chmod(submit_script_path, 0o755)
+
+    jobs_summary_path = os.path.join(output_dir, "jobs_summary.json")
+    with open(jobs_summary_path, "w") as f:
+        json.dump({
+            "total_jobs": len(all_jobs),
+            "games": games,
+            "algorithms": algorithms,
+            "game_pairs": [[src, tgt] for src, tgt in game_pairs],
+            "jobs": all_jobs,
+        }, f, indent=2)
+
+    print(f"\n{'='*60}")
+    print(f"Generated {len(all_jobs)} SLURM job scripts")
+    print(f"Scripts directory: {scripts_dir}")
+    print(f"Submit all jobs: {submit_script_path}")
+    print(f"Jobs summary: {jobs_summary_path}")
+    print(f"{'='*60}\n")
+    print(f"To submit all jobs, run:")
+    print(f"  bash {submit_script_path}")
+    print(f"\nOr submit individual jobs:")
+    print(f"  sbatch {scripts_dir}/<job_name>.sh")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Generate SLURM job scripts for transfer learning experiments")
+    parser.add_argument("--config", type=str, help="JSON config file with games list")
+    parser.add_argument("--games", type=str, nargs="+", help="List of Atari games (e.g., Pong Breakout SpaceInvaders)")
+    parser.add_argument("--algorithms", type=str, nargs="+", default=["dqn", "ppo"],
+                        choices=["dqn", "ppo"], help="RL algorithms to use")
+    parser.add_argument("--source-timesteps", type=int, default=1000000,
+                        help="Training timesteps for source game")
+    parser.add_argument("--target-timesteps", type=int, default=1000000,
+                        help="Training timesteps for target game")
+    parser.add_argument("--output-dir", type=str, default="results",
+                        help="Output directory for experiments")
+    parser.add_argument("--partition", type=str, default="gpu",
+                        help="SLURM partition")
+    parser.add_argument("--time-limit", type=str, default="24:00:00",
+                        help="Time limit per job (HH:MM:SS)")
+    parser.add_argument("--mem", type=str, default="32G",
+                        help="Memory per job")
+    parser.add_argument("--cpus", type=int, default=4,
+                        help="CPUs per task")
+    parser.add_argument("--gpus", type=int, default=1,
+                        help="GPUs per task")
+    parser.add_argument("--conda-env", type=str, default=None,
+                        help="Conda environment name to activate")
+
+    args = parser.parse_args()
+
+    if args.config:
+        with open(args.config, "r") as f:
+            config = json.load(f)
+        games = config.get("games", [])
+    elif args.games:
+        games = args.games
+    else:
+        print("Error: Must provide either --config or --games")
+        exit(1)
+
+    if len(games) < 2:
+        print("Error: Need at least 2 games for pairwise transfer learning")
+        exit(1)
+
+    generate_all_jobs(
+        games=games,
+        algorithms=args.algorithms,
+        source_timesteps=args.source_timesteps,
+        target_timesteps=args.target_timesteps,
+        output_dir=args.output_dir,
+        partition=args.partition,
+        time_limit=args.time_limit,
+        mem=args.mem,
+        cpus=args.cpus,
+        gpus=args.gpus,
+        conda_env=args.conda_env,
+    )
