@@ -20,7 +20,7 @@
   },
   "slurm": {
     "partition": "gpu",
-    "time_limit": "24:00:00",
+    "time_limit": "7-00:00:00",
     "mem": "32G",
     "cpus": 4,
     "gpus": 1,
