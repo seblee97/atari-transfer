@@ -86,21 +86,21 @@ def train_qrdqn(
 
             # Handle freeze encoder and reinit head for same action space
             if freeze_encoder or reinit_head:
-                q_net = model.q_net
-                target_net = model.q_net_target
+                quantile_net = model.quantile_net
+                target_net = model.quantile_net_target
 
                 if reinit_head:
                     print("Reinitializing QR-DQN quantile head (final layer)")
                     # Reinitialize the final linear layer
-                    if hasattr(q_net.q_net, 'q_net'):
-                        # Standard DQN has q_net.q_net structure
-                        final_layer = list(q_net.q_net.children())[-1]
+                    if hasattr(quantile_net, 'quantile_net'):
+                        # QR-DQN has quantile_net.quantile_net structure
+                        final_layer = list(quantile_net.quantile_net.children())[-1]
                         if isinstance(final_layer, torch.nn.Linear):
                             torch.nn.init.orthogonal_(final_layer.weight, gain=1)
                             torch.nn.init.constant_(final_layer.bias, 0.0)
 
                         # Do the same for target network
-                        final_layer_target = list(target_net.q_net.children())[-1]
+                        final_layer_target = list(target_net.quantile_net.children())[-1]
                         if isinstance(final_layer_target, torch.nn.Linear):
                             torch.nn.init.orthogonal_(final_layer_target.weight, gain=1)
                             torch.nn.init.constant_(final_layer_target.bias, 0.0)
@@ -108,15 +108,15 @@ def train_qrdqn(
                 if freeze_encoder:
                     print("Freezing CNN encoder layers")
                     # Freeze all layers except the final linear layer
-                    if hasattr(q_net.q_net, 'q_net'):
-                        layers = list(q_net.q_net.children())
+                    if hasattr(quantile_net, 'quantile_net'):
+                        layers = list(quantile_net.quantile_net.children())
                         # Freeze all but the last layer
                         for layer in layers[:-1]:
                             for param in layer.parameters():
                                 param.requires_grad = False
 
                         # Do the same for target network
-                        layers_target = list(target_net.q_net.children())
+                        layers_target = list(target_net.quantile_net.children())
                         for layer in layers_target[:-1]:
                             for param in layer.parameters():
                                 param.requires_grad = False
