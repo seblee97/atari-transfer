@@ -73,7 +73,9 @@ def train_ppo(
 
         try:
             # Try to load the model directly
-            model = PPO.load(pretrained_model, env=env)
+            # Use custom_objects to handle potential incompatibilities with zoo models
+            custom_objects = {}
+            model = PPO.load(pretrained_model, env=env, custom_objects=custom_objects)
             model.set_logger(logger)
 
             # Handle freeze encoder and reinit head for same action space

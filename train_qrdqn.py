@@ -76,7 +76,12 @@ def train_qrdqn(
 
         try:
             # Try to load the model directly
-            model = QRDQN.load(pretrained_model, env=env)
+            # Override incompatible buffer settings for QR-DQN zoo models
+            custom_objects = {
+                "optimize_memory_usage": False,
+                "handle_timeout_termination": False,
+            }
+            model = QRDQN.load(pretrained_model, env=env, custom_objects=custom_objects)
             model.set_logger(logger)
 
             # Handle freeze encoder and reinit head for same action space

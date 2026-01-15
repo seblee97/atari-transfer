@@ -75,7 +75,12 @@ def train_dqn(
 
         try:
             # Try to load the model directly
-            model = DQN.load(pretrained_model, env=env)
+            # Override incompatible buffer settings for zoo models
+            custom_objects = {
+                "optimize_memory_usage": False,
+                "handle_timeout_termination": False,
+            }
+            model = DQN.load(pretrained_model, env=env, custom_objects=custom_objects)
             model.set_logger(logger)
 
             # Handle freeze encoder and reinit head for same action space
