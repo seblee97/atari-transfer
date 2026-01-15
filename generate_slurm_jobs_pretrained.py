@@ -54,7 +54,16 @@ cd $SLURM_SUBMIT_DIR
     if venv_path:
         script_content += f"""
 # Activate virtual environment
-source {venv_path}/bin/activate
+echo "Activating virtual environment: {venv_path}"
+if [ -f "{venv_path}/bin/activate" ]; then
+    source {venv_path}/bin/activate
+    echo "Virtual environment activated successfully"
+    echo "Python path: $(which python)"
+    echo "Python version: $(python --version)"
+else
+    echo "ERROR: Virtual environment not found at {venv_path}/bin/activate"
+    exit 1
+fi
 """
     elif conda_env:
         script_content += f"""
@@ -218,7 +227,16 @@ def generate_all_jobs_pretrained(
         f.write("# Pre-download all models before submitting jobs\n\n")
 
         if venv_path:
-            f.write(f"source {venv_path}/bin/activate\n\n")
+            f.write(f"# Activate virtual environment\n")
+            f.write(f"echo \"Activating virtual environment: {venv_path}\"\n")
+            f.write(f"if [ -f \"{venv_path}/bin/activate\" ]; then\n")
+            f.write(f"    source {venv_path}/bin/activate\n")
+            f.write(f"    echo \"Virtual environment activated successfully\"\n")
+            f.write(f"    echo \"Python path: $(which python)\"\n")
+            f.write(f"else\n")
+            f.write(f"    echo \"ERROR: Virtual environment not found at {venv_path}/bin/activate\"\n")
+            f.write(f"    exit 1\n")
+            f.write(f"fi\n\n")
         elif conda_env:
             f.write(f"source $(conda info --base)/etc/profile.d/conda.sh\n")
             f.write(f"conda activate {conda_env}\n\n")
