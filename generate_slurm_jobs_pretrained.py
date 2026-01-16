@@ -363,6 +363,10 @@ if __name__ == "__main__":
             # Filter to only algorithms with pre-trained models available
             available_algos = ["dqn", "ppo", "qrdqn"]
             args.algorithms = [a for a in config["algorithms"] if a in available_algos]
+
+        # Load output_dir from config if not provided on command line
+        if args.output_dir == "results" and "output_dir" in config:
+            args.output_dir = config["output_dir"]
     elif args.games:
         games = args.games
     else:

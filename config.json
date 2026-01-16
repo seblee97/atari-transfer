@@ -10,6 +10,7 @@
     "ppo",
     "qrdqn"
   ],
+  "output_dir": "results",
   "training": {
     "source_timesteps": 1000000,
     "target_timesteps": 1000000,

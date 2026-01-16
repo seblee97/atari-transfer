@@ -8,6 +8,7 @@
     "dqn",
     "ppo"
   ],
+  "output_dir": "results",
   "training": {
     "target_timesteps": 1000000,
     "freeze_encoder": true,

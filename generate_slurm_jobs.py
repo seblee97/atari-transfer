@@ -44,7 +44,16 @@ echo "Target game: {target_game}"
     if venv_path:
         script_content += f"""
 # Activate virtual environment
-source {venv_path}/bin/activate
+echo "Activating virtual environment: {venv_path}"
+if [ -f "{venv_path}/bin/activate" ]; then
+    source {venv_path}/bin/activate
+    echo "Virtual environment activated successfully"
+    echo "Python path: $(which python)"
+    echo "Python version: $(python --version)"
+else
+    echo "ERROR: Virtual environment not found at {venv_path}/bin/activate"
+    exit 1
+fi
 """
     elif conda_env:
         script_content += f"""
@@ -246,6 +255,10 @@ if __name__ == "__main__":
 
         if "algorithms" in config and args.algorithms is None:
             args.algorithms = config["algorithms"]
+
+        # Load output_dir from config if not provided on command line
+        if args.output_dir == "results" and "output_dir" in config:
+            args.output_dir = config["output_dir"]
     elif args.games:
         games = args.games
     else:
