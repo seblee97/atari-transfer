@@ -1,0 +1,30 @@
+{
+  "games": [
+    "Pong",
+    "Breakout",
+    "SpaceInvaders"
+  ],
+  "algorithms": [
+    "dqn",
+    "ppo",
+    "qrdqn"
+  ],
+  "output_dir": "results_baseline",
+  "training": {
+    "timesteps": 200000000,
+    "checkpoint_freq": 20000000,
+    "eval_freq": 10000
+  },
+  "slurm": {
+    "partition": "gpu",
+    "time_limit": "7-00:00:00",
+    "mem": "32G",
+    "cpus": 4,
+    "gpus": 1,
+    "venv_path": "/path/to/your/venv"
+  },
+  "notes": {
+    "description": "Baseline training from scratch (no transfer learning)",
+    "purpose": "Generate learning curves for from-scratch training to compare with transfer learning results"
+  }
+}
