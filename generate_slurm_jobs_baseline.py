@@ -73,21 +73,26 @@ conda activate {conda_env}
     # Create experiment directory structure
     exp_name = f"{algorithm}_{game}_baseline"
 
-    # Use absolute path for output directory if provided, otherwise relative to PROJECT_DIR
-    if os.path.isabs(output_dir):
-        exp_dir_template = f"{output_dir}/{exp_name}_${{SLURM_JOB_ID}}"
-    else:
-        exp_dir_template = f"${{PROJECT_DIR}}/{output_dir}/{exp_name}_${{SLURM_JOB_ID}}"
-
+    # Always use absolute paths for output to avoid confusion
     script_content += f"""
-# Create experiment directories
-EXP_DIR="{exp_dir_template}"
+# Determine absolute output directory
+if [[ "{output_dir}" = /* ]]; then
+    # Already absolute path
+    OUTPUT_BASE="{output_dir}"
+else
+    # Relative path - make it relative to project dir
+    OUTPUT_BASE="$PROJECT_DIR/{output_dir}"
+fi
+
+# Create experiment directories with absolute paths
+EXP_DIR="${{OUTPUT_BASE}}/{exp_name}_${{SLURM_JOB_ID}}"
 mkdir -p "${{EXP_DIR}}/checkpoints"
 mkdir -p "${{EXP_DIR}}/logs"
 
+echo "Output base directory: $OUTPUT_BASE"
 echo "Experiment directory: $EXP_DIR"
 
-# Run baseline training (from project directory where scripts are located)
+# Run baseline training (stays in project directory where scripts are)
 python train_{algorithm}.py \\
     --game {game} \\
     --timesteps {timesteps} \\
