@@ -9,7 +9,7 @@
     "ppo",
     "qrdqn"
   ],
-  "output_dir": "results_baseline",
+  "output_dir": "/mnt/home/slee1/ceph/atari_transfer_results",
   "training": {
     "timesteps": 200000000,
     "checkpoint_freq": 20000000,
@@ -21,7 +21,7 @@
     "mem": "32G",
     "cpus": 4,
     "gpus": 1,
-    "venv_path": "/path/to/your/venv"
+    "venv_path": "/mnt/home/slee1/venvs/atari-transfer"
   },
   "notes": {
     "description": "Baseline training from scratch (no transfer learning)",

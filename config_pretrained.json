@@ -6,14 +6,15 @@
   ],
   "algorithms": [
     "dqn",
-    "ppo"
+    "ppo",
+    "qrdqn"
   ],
-  "output_dir": "results",
+  "output_dir": "/mnt/home/slee1/ceph/atari_transfer_results",
   "training": {
-    "target_timesteps": 1000000,
-    "checkpoint_freq": 50000,
+    "target_timesteps": 200000000,
+    "checkpoint_freq": 20000000,
     "eval_freq": 10000,
-    "freeze_encoder": true,
+    "freeze_encoder": false,
     "reinit_head": true
   },
   "slurm": {
@@ -22,7 +23,7 @@
     "mem": "32G",
     "cpus": 4,
     "gpus": 1,
-    "conda_env": "atari-rl"
+    "conda_env": "/mnt/home/slee1/venvs/atari-transfer"
   },
   "notes": {
     "description": "Transfer learning experiments using pre-trained models from RL Baselines3 Zoo",
