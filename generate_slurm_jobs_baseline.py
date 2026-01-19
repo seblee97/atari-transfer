@@ -43,8 +43,10 @@ echo "Job started: $(date)"
 echo "Running on node: $(hostname)"
 echo "Job ID: $SLURM_JOB_ID"
 
-# Change to project directory
-cd $SLURM_SUBMIT_DIR
+# Project directory (where scripts are located)
+PROJECT_DIR=$SLURM_SUBMIT_DIR
+cd $PROJECT_DIR
+echo "Project directory: $PROJECT_DIR"
 """
 
     if venv_path:
@@ -70,17 +72,22 @@ conda activate {conda_env}
 
     # Create experiment directory structure
     exp_name = f"{algorithm}_{game}_baseline"
-    exp_dir = f"{output_dir}/{exp_name}_${{SLURM_JOB_ID}}"
+
+    # Use absolute path for output directory if provided, otherwise relative to PROJECT_DIR
+    if os.path.isabs(output_dir):
+        exp_dir_template = f"{output_dir}/{exp_name}_${{SLURM_JOB_ID}}"
+    else:
+        exp_dir_template = f"${{PROJECT_DIR}}/{output_dir}/{exp_name}_${{SLURM_JOB_ID}}"
 
     script_content += f"""
 # Create experiment directories
-EXP_DIR="{exp_dir}"
+EXP_DIR="{exp_dir_template}"
 mkdir -p "${{EXP_DIR}}/checkpoints"
 mkdir -p "${{EXP_DIR}}/logs"
 
 echo "Experiment directory: $EXP_DIR"
 
-# Run baseline training
+# Run baseline training (from project directory where scripts are located)
 python train_{algorithm}.py \\
     --game {game} \\
     --timesteps {timesteps} \\
