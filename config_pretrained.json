@@ -11,6 +11,8 @@
   "output_dir": "results",
   "training": {
     "target_timesteps": 1000000,
+    "checkpoint_freq": 50000,
+    "eval_freq": 10000,
     "freeze_encoder": true,
     "reinit_head": true
   },
