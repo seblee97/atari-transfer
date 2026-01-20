@@ -1,0 +1,43 @@
+{
+  "source_games": [
+    "Pong",
+    "Breakout",
+    "SpaceInvaders"
+  ],
+  "target_games": [
+    "Pong",
+    "Breakout",
+    "SpaceInvaders"
+  ],
+  "algorithms": [
+    "dqn",
+    "ppo",
+    "qrdqn"
+  ],
+  "output_dir": "/mnt/home/slee1/ceph/atari_phased_results",
+  "training": {
+    "total_source_timesteps": 50000000,
+    "num_phases": 5,
+    "target_timesteps": 50000000,
+    "checkpoint_freq": 5000000,
+    "eval_freq": 10000,
+    "freeze_encoder": false,
+    "reinit_head": true
+  },
+  "slurm": {
+    "partition": "gpu",
+    "source_time_limit": "5-00:00:00",
+    "transfer_time_limit": "5-00:00:00",
+    "mem": "32G",
+    "cpus": 4,
+    "gpus": 1,
+    "venv_path": "/mnt/home/slee1/venvs/atari-transfer"
+  },
+  "notes": {
+    "description": "Phased transfer learning with per-checkpoint transfer jobs",
+    "workflow": "Source games are trained in 10 phases of 20M timesteps each. After each phase completes and creates a checkpoint, transfer learning jobs automatically start for all target games.",
+    "efficiency": "Maximum parallelism - transfer jobs start as soon as each checkpoint is ready, not waiting for full source training",
+    "total_experiments": "For 2 source games, 3 target games (minus self-transfer = 4 transfers per source), 3 algorithms, 10 phases = 2 * 10 * 3 source phases + 4 * 10 * 3 transfer jobs = 60 source + 120 transfer = 180 total jobs",
+    "dependency_chaining": "All jobs use SLURM dependency chaining for automatic scheduling - no manual intervention needed"
+  }
+}
