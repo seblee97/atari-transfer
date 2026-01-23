@@ -147,7 +147,7 @@ def create_transfer_with_wait_slurm_script(
 #SBATCH --mem={mem}
 #SBATCH --cpus-per-task={cpus}
 #SBATCH --gres=gpu:{gpus}
-#SBATCH --dependency=afterany:{dependency_job_id_var}
+#SBATCH --dependency=after:{dependency_job_id_var}
 
 echo "Job started: $(date)"
 echo "Running on node: $(hostname)"
@@ -166,6 +166,8 @@ echo "Activating virtual environment: {venv_path}"
 if [ -f "{venv_path}/bin/activate" ]; then
     source {venv_path}/bin/activate
     echo "Virtual environment activated successfully"
+    echo "Python path: $(which python)"
+    echo "Python version: $(python --version)"
 else
     echo "ERROR: Virtual environment not found at {venv_path}/bin/activate"
     exit 1
@@ -388,7 +390,7 @@ def generate_phased_experiments_v2(
 
                     # Add submission command
                     submit_commands.append(
-                        f'sbatch --dependency=afterany:${{{source_job_var}}} {transfer_script_path} >/dev/null'
+                        f'sbatch --dependency=after:${{{source_job_var}}} {transfer_script_path} >/dev/null'
                     )
 
                     print(f"    → Transfer to {target_game} at {checkpoint_steps:,} steps")
