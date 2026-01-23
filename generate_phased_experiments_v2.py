@@ -266,6 +266,7 @@ def generate_phased_experiments_v2(
     num_checkpoints,
     target_timesteps,
     output_dir,
+    checkpoint_freq=None,
     eval_freq=10000,
     freeze_encoder=False,
     reinit_head=True,
@@ -285,9 +286,10 @@ def generate_phased_experiments_v2(
         target_games: List of games to transfer to
         algorithms: List of algorithms to use
         total_source_timesteps: Total timesteps for source training (continuous)
-        num_checkpoints: Number of checkpoints to save during source training
+        num_checkpoints: Number of checkpoints (used if checkpoint_freq not specified)
         target_timesteps: Timesteps for target training
         output_dir: Base output directory
+        checkpoint_freq: Frequency of checkpoints in timesteps (overrides num_checkpoints)
         ... (other parameters)
     """
     os.makedirs(output_dir, exist_ok=True)
@@ -296,8 +298,16 @@ def generate_phased_experiments_v2(
     os.makedirs(os.path.join(output_dir, "slurm_logs"), exist_ok=True)
 
     # Calculate checkpoint intervals
-    checkpoint_interval = total_source_timesteps // num_checkpoints
-    checkpoint_intervals = [checkpoint_interval * (i + 1) for i in range(num_checkpoints)]
+    if checkpoint_freq is not None:
+        # Use checkpoint_freq from config
+        num_checkpoints_actual = total_source_timesteps // checkpoint_freq
+        checkpoint_intervals = [checkpoint_freq * (i + 1) for i in range(num_checkpoints_actual)]
+        print(f"Using checkpoint_freq: {checkpoint_freq:,} → {num_checkpoints_actual} checkpoints")
+    else:
+        # Use num_checkpoints
+        checkpoint_interval = total_source_timesteps // num_checkpoints
+        checkpoint_intervals = [checkpoint_interval * (i + 1) for i in range(num_checkpoints)]
+        print(f"Using num_checkpoints: {num_checkpoints} → checkpoint every {checkpoint_interval:,} steps")
 
     # Store submission commands
     submit_commands = []
@@ -441,6 +451,8 @@ if __name__ == "__main__":
     parser.add_argument("--total-source-timesteps", type=int, default=None)
     parser.add_argument("--num-checkpoints", type=int, default=None,
                        help="Number of checkpoints to save (replaces num_phases)")
+    parser.add_argument("--checkpoint-freq", type=int, default=None,
+                       help="Checkpoint frequency in timesteps (overrides num-checkpoints)")
     parser.add_argument("--target-timesteps", type=int, default=None)
     parser.add_argument("--eval-freq", type=int, default=None)
     parser.add_argument("--output-dir", type=str, default="results_phased_v2")
@@ -468,8 +480,11 @@ if __name__ == "__main__":
             training_config = config["training"]
             if args.total_source_timesteps is None:
                 args.total_source_timesteps = training_config.get("total_source_timesteps", 50000000)
-            if args.num_checkpoints is None:
-                # Use num_phases from config as num_checkpoints
+            if args.checkpoint_freq is None:
+                # Try to get checkpoint_freq from config first
+                args.checkpoint_freq = training_config.get("checkpoint_freq")
+            if args.num_checkpoints is None and args.checkpoint_freq is None:
+                # Use num_phases from config as fallback for num_checkpoints
                 args.num_checkpoints = training_config.get("num_phases", 5)
             if args.target_timesteps is None:
                 args.target_timesteps = training_config.get("target_timesteps", 50000000)
@@ -546,6 +561,7 @@ if __name__ == "__main__":
         num_checkpoints=args.num_checkpoints,
         target_timesteps=args.target_timesteps,
         output_dir=args.output_dir,
+        checkpoint_freq=args.checkpoint_freq,
         eval_freq=args.eval_freq,
         freeze_encoder=args.freeze_encoder,
         reinit_head=args.reinit_head,
