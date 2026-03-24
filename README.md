@@ -29,17 +29,26 @@ pip install -r requirements.txt
 
 ```
 atari-transfer-rl/
-├── train_dqn.py              # DQN training script
-├── train_ppo.py              # PPO training script
-├── train_sac.py              # SAC training script
-├── train_qrdqn.py            # QR-DQN training script
-├── transfer_learning.py      # Transfer learning wrapper
-├── generate_slurm_jobs.py    # SLURM job generator
-├── config.json               # Configuration file
-├── requirements.txt          # Python dependencies
-├── checkpoints/              # Model checkpoints (auto-created)
-├── logs/                     # Training logs (auto-created)
-└── results/                  # Experiment results (auto-created)
+├── train_dqn.py                      # DQN training script
+├── train_ppo.py                      # PPO training script
+├── train_sac.py                      # SAC training script
+├── train_qrdqn.py                    # QR-DQN training script
+├── train_phased.py                   # Phased training with resume support (NEW)
+├── transfer_learning.py              # Transfer learning wrapper
+├── generate_slurm_jobs.py            # SLURM job generator (standard)
+├── generate_slurm_jobs_baseline.py   # Generate baseline training jobs
+├── generate_slurm_jobs_pretrained.py # Use pre-trained models (fast)
+├── generate_phased_experiments.py    # Phased experiments (fastest, NEW)
+├── config.json                       # Standard experiment config
+├── config_baseline.json              # Baseline training config
+├── config_pretrained.json            # Pre-trained models config
+├── config_phased.json                # Phased experiments config (NEW)
+├── transfer_analysis.ipynb           # Jupyter notebook for analysis
+├── PHASED_EXPERIMENTS.md             # Phased experiments guide (NEW)
+├── requirements.txt                  # Python dependencies
+├── checkpoints/                      # Model checkpoints (auto-created)
+├── logs/                             # Training logs (auto-created)
+└── results/                          # Experiment results (auto-created)
 ```
 
 ## Usage
@@ -141,6 +150,59 @@ Or submit individual jobs:
 ```bash
 sbatch results/slurm_scripts/dqn_Pong_to_Breakout.sh
 ```
+
+### 3b. Batch Experiments with Pre-trained Models (50% Faster!)
+
+Save time by using pre-trained models from RL Baselines3 Zoo:
+
+```bash
+# Generate SLURM jobs that use pre-trained models
+python generate_slurm_jobs_pretrained.py --config config_pretrained.json
+
+# Pre-download all models (recommended)
+bash results/slurm_scripts_pretrained/download_all_models.sh
+
+# Submit all jobs (these run ~50% faster)
+bash results/slurm_scripts_pretrained/submit_all.sh
+```
+
+**Benefits:**
+- Skip source training entirely (saves 2-4 hours per experiment)
+- Uses high-quality models trained for 10M timesteps
+- Automatic fallback to training from scratch if model unavailable
+
+See [SLURM_PRETRAINED_GUIDE.md](SLURM_PRETRAINED_GUIDE.md) for complete details.
+
+### 3c. **NEW: Phased Experiments with Per-Checkpoint Transfers (6-9x Faster!)**
+
+For maximum efficiency, train source models in phases and automatically start transfer jobs after each checkpoint:
+
+```bash
+# Generate phased experiment jobs with automatic dependency chaining
+python generate_phased_experiments.py --config config_phased.json
+
+# Submit all jobs at once (SLURM handles scheduling automatically)
+bash results_phased/slurm_scripts_phased/submit_all.sh
+```
+
+**How it works:**
+1. Source training is split into phases (e.g., 200M steps → 10 phases of 20M each)
+2. After each phase completes and creates a checkpoint, transfer jobs automatically start
+3. Multiple transfer jobs run in parallel while later source phases train
+4. Uses SLURM job dependencies for automatic scheduling
+
+**Benefits:**
+- **6-9x speedup** compared to sequential training (train source → then transfer)
+- Maximum parallelism - transfer jobs start as soon as checkpoints are ready
+- No manual intervention - submit once, everything runs automatically
+- Study how transfer performance changes with different amounts of source training
+
+**Example:** Train 2 source games for 200M steps each, transfer to 3 targets:
+- **Without phasing:** ~90 days sequential (source then transfer)
+- **With phasing:** ~10-15 days with parallelism
+- **Speedup: 6-9x faster!**
+
+See [PHASED_EXPERIMENTS.md](PHASED_EXPERIMENTS.md) for complete documentation.
 
 ## Configuration
 
@@ -282,6 +344,101 @@ squeue -u $USER
 # Monitor with TensorBoard
 tensorboard --logdir results/
 ```
+
+## Using Pre-trained Models (Time Saver!)
+
+Instead of training source models from scratch, you can use pre-trained models from RL Baselines3 Zoo:
+
+```bash
+# 1. List available pre-trained models
+python download_pretrained_models.py --list
+
+# 2. Download models for your experiments
+python download_pretrained_models.py --games Pong Breakout SpaceInvaders --algorithms dqn ppo
+
+# 3. Run transfer learning with pre-trained source
+python transfer_learning_pretrained.py \
+    --algorithm dqn \
+    --source-game Pong \
+    --target-game Breakout \
+    --pretrained-model pretrained_models/dqn/Pong.zip \
+    --target-timesteps 1000000 \
+    --freeze-encoder \
+    --reinit-head
+```
+
+**Benefits:**
+- Saves 2-4 hours per source game training
+- High-quality models trained for 10M timesteps
+- Consistent baselines across experiments
+
+See [PRETRAINED_MODELS_GUIDE.md](PRETRAINED_MODELS_GUIDE.md) for complete details.
+
+## Analyzing Results
+
+After experiments complete, use the analysis scripts to evaluate transfer learning performance:
+
+### 1. Generate Summary Statistics
+
+```bash
+python analyze_results.py --results-dir results
+```
+
+This will:
+- Parse all experiment directories
+- Extract performance metrics from training logs
+- Generate comparison tables by algorithm and game pair
+- Create a CSV summary (`results_summary.csv`)
+
+Options:
+- `--results-dir`: Directory containing experiment results (default: `results`)
+- `--output`: Output CSV filename (default: `results_summary.csv`)
+- `--status-only`: Only show experiment status without full analysis
+
+### 2. Visualize Results
+
+```bash
+python visualize_results.py --summary results_summary.csv
+```
+
+This generates plots in the `plots/` directory:
+- **algorithm_comparison.png**: Bar chart comparing algorithms
+- **transfer_matrix_*.png**: Heatmaps showing which game pairs transfer well
+- **strategy_comparison.png**: Comparison of baseline vs freeze vs reinit strategies
+- **game_pair_ranking.png**: Best and worst game pairs for transfer
+
+Options:
+- `--summary`: Path to summary CSV (default: `results_summary.csv`)
+- `--output-dir`: Directory to save plots (default: `plots`)
+
+### 3. Interpreting Results
+
+Key metrics to examine:
+- **Source Final Reward**: Performance on the source game after initial training (from-scratch baseline)
+- **Target Final Reward**: Performance on the target game after transfer
+- **Max Reward**: Best performance achieved during training
+- **Transfer Benefit**: Target performance compared to from-scratch baseline
+
+#### Understanding Transfer Benefit
+
+The analysis automatically computes transfer learning benefit by comparing:
+- **Baseline**: When a game is trained as the source (no pre-training)
+- **Transfer**: When a game is trained as the target (with pre-training from various sources)
+
+For example, if Breakout has:
+- Baseline (from-scratch): 1.83 reward
+- Transfer average: 3.73 reward
+- **Benefit**: +1.90 (+103% improvement) 🔥
+
+This means pre-training on other games **doubles** performance on Breakout!
+
+See [TRANSFER_BENEFIT_EXPLANATION.md](TRANSFER_BENEFIT_EXPLANATION.md) for detailed interpretation of your results.
+
+Compare:
+- Different algorithms (DQN vs PPO vs QR-DQN)
+- Transfer strategies (baseline vs freeze encoder vs reinit head)
+- Game pair combinations (which games transfer well to each other)
+- Transfer benefit (does pre-training help or hurt?)
 
 ## Algorithm Comparison
 

@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import argparse
 import os
+import random
 from pathlib import Path
 
 import gymnasium as gym
 import ale_py
+import numpy as np
 import torch
 from sb3_contrib import QRDQN
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
@@ -16,10 +18,29 @@ from stable_baselines3.common.save_util import load_from_zip_file
 # Register ALE environments
 gym.register_envs(ale_py)
 
-def make_atari_env(game_name):
+
+def set_global_seeds(seed):
+    """
+    Set random seeds for reproducibility across all libraries.
+
+    Args:
+        seed: Random seed value
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make PyTorch deterministic (may impact performance slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def make_atari_env(game_name, seed=None):
     def _init():
         env = gym.make(f"ALE/{game_name}-v5", render_mode=None)
         env = AtariWrapper(env)
+        if seed is not None:
+            env.reset(seed=seed)
         return env
     return _init
 
@@ -41,14 +62,20 @@ def train_qrdqn(
     n_quantiles=200,
     freeze_encoder=False,
     reinit_head=False,
+    seed=None,
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
-    env = DummyVecEnv([make_atari_env(game_name)])
+    # Set random seeds for reproducibility
+    if seed is not None:
+        print(f"Setting random seed: {seed}")
+        set_global_seeds(seed)
+
+    env = DummyVecEnv([make_atari_env(game_name, seed=seed)])
     env = VecFrameStack(env, n_stack=4)
 
-    eval_env = DummyVecEnv([make_atari_env(game_name)])
+    eval_env = DummyVecEnv([make_atari_env(game_name, seed=seed)])
     eval_env = VecFrameStack(eval_env, n_stack=4)
 
     logger = configure(log_dir, ["stdout", "csv", "tensorboard"])
@@ -143,6 +170,7 @@ def train_qrdqn(
                     target_update_interval=target_update_interval,
                     exploration_fraction=exploration_fraction,
                     exploration_final_eps=exploration_final_eps,
+                    seed=seed,
                     verbose=1,
                     tensorboard_log=log_dir,
                 )
@@ -186,6 +214,7 @@ def train_qrdqn(
             target_update_interval=target_update_interval,
             exploration_fraction=exploration_fraction,
             exploration_final_eps=exploration_final_eps,
+            seed=seed,
             verbose=1,
             tensorboard_log=log_dir,
         )
@@ -223,6 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--n-quantiles", type=int, default=200, help="Number of quantiles for QR-DQN")
     parser.add_argument("--freeze-encoder", action="store_true", help="Freeze CNN encoder layers during transfer")
     parser.add_argument("--reinit-head", action="store_true", help="Reinitialize the quantile head weights")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
 
     args = parser.parse_args()
 
@@ -239,4 +269,5 @@ if __name__ == "__main__":
         n_quantiles=args.n_quantiles,
         freeze_encoder=args.freeze_encoder,
         reinit_head=args.reinit_head,
+        seed=args.seed,
     )

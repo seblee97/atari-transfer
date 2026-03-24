@@ -1,6 +1,8 @@
 stable-baselines3[extra]>=2.0.0
 sb3-contrib>=2.0.0
 gymnasium[atari,accept-rom-license]>=0.29.0
+gym>=0.26.0  # Required for loading old pre-trained models from RL Baselines3 Zoo
+shimmy>=0.2.1  # Required for gym <-> gymnasium compatibility when loading old models
 ale-py>=0.8.0
 torch>=2.0.0
 tensorboard>=2.14.0

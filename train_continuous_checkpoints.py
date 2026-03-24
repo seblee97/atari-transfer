@@ -11,10 +11,13 @@ checkpoint is created.
 """
 import argparse
 import os
+import random
 from pathlib import Path
 
 import gymnasium as gym
 import ale_py
+import numpy as np
+import torch
 from stable_baselines3 import DQN, PPO, SAC
 from sb3_contrib import QRDQN
 from stable_baselines3.common.vec_env import VecFrameStack, DummyVecEnv
@@ -26,10 +29,28 @@ from stable_baselines3.common.logger import configure
 gym.register_envs(ale_py)
 
 
-def make_atari_env(game_name):
+def set_global_seeds(seed):
+    """
+    Set random seeds for reproducibility across all libraries.
+
+    Args:
+        seed: Random seed value
+    """
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # Make PyTorch deterministic (may impact performance slightly)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+def make_atari_env(game_name, seed=None):
     def _init():
         env = gym.make(f"ALE/{game_name}-v5", render_mode=None)
         env = AtariWrapper(env)
+        if seed is not None:
+            env.reset(seed=seed)
         return env
     return _init
 
@@ -140,6 +161,7 @@ def train_continuous_with_checkpoints(
     log_dir,
     checkpoint_intervals=None,
     eval_freq=10000,
+    seed=None,
 ):
     """
     Train a model continuously with periodic checkpoints.
@@ -153,15 +175,21 @@ def train_continuous_with_checkpoints(
         checkpoint_intervals: List of timestep counts where checkpoints should be saved
                              e.g., [10000000, 20000000, 30000000] for 10M, 20M, 30M
         eval_freq: Frequency of evaluations
+        seed: Random seed for reproducibility
     """
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
 
+    # Set random seeds for reproducibility
+    if seed is not None:
+        print(f"Setting random seed: {seed}")
+        set_global_seeds(seed)
+
     # Create environment
-    env = DummyVecEnv([make_atari_env(game_name)])
+    env = DummyVecEnv([make_atari_env(game_name, seed=seed)])
     env = VecFrameStack(env, n_stack=4)
 
-    eval_env = DummyVecEnv([make_atari_env(game_name)])
+    eval_env = DummyVecEnv([make_atari_env(game_name, seed=seed)])
     eval_env = VecFrameStack(eval_env, n_stack=4)
 
     # Configure logger
@@ -179,6 +207,7 @@ def train_continuous_with_checkpoints(
         "CnnPolicy",
         env,
         **hyperparams,
+        seed=seed,
         verbose=1,
         tensorboard_log=log_dir,
     )
@@ -240,6 +269,8 @@ if __name__ == "__main__":
                        help="Timesteps at which to save checkpoints (e.g., 10000000 20000000 30000000)")
     parser.add_argument("--eval-freq", type=int, default=10000,
                        help="Evaluation frequency")
+    parser.add_argument("--seed", type=int, default=None,
+                       help="Random seed for reproducibility")
 
     args = parser.parse_args()
 
@@ -251,4 +282,5 @@ if __name__ == "__main__":
         log_dir=args.log_dir,
         checkpoint_intervals=args.checkpoint_intervals,
         eval_freq=args.eval_freq,
+        seed=args.seed,
     )

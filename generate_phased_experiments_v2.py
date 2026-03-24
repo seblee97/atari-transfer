@@ -32,6 +32,7 @@ def create_continuous_source_slurm_script(
     cpus=4,
     gpus=1,
     venv_path=None,
+    seed=None,
 ):
     """Create a SLURM script for continuous source training with checkpoints."""
 
@@ -89,7 +90,11 @@ mkdir -p "${{EXP_DIR}}/logs"
 echo "Experiment directory: $EXP_DIR"
 echo "Training for {total_timesteps:,} timesteps continuously"
 echo "Checkpoints at: {checkpoint_intervals_str}"
+"""
 
+    seed_flag = f" \\\n    --seed {seed}" if seed is not None else ""
+
+    script_content += f"""
 # Run continuous training with checkpoints
 python train_continuous_checkpoints.py \\
     --algorithm {algorithm} \\
@@ -98,7 +103,7 @@ python train_continuous_checkpoints.py \\
     --checkpoint-dir "${{EXP_DIR}}/checkpoints" \\
     --log-dir "${{EXP_DIR}}/logs" \\
     --checkpoint-intervals {checkpoint_intervals_str} \\
-    --eval-freq {eval_freq}
+    --eval-freq {eval_freq}{seed_flag}
 
 EXIT_CODE=$?
 
@@ -135,6 +140,7 @@ def create_transfer_with_wait_slurm_script(
     cpus=4,
     gpus=1,
     venv_path=None,
+    seed=None,
 ):
     """Create a SLURM script for transfer learning that waits for checkpoint."""
 
@@ -230,6 +236,7 @@ echo "Checkpoint found! Starting transfer learning..."
 
     freeze_flag = "--freeze-encoder" if freeze_encoder else ""
     reinit_flag = "--reinit-head" if reinit_head else ""
+    seed_flag = f"--seed {seed}" if seed is not None else ""
 
     script_content += f"""
 python train_{algorithm}.py \\
@@ -241,7 +248,8 @@ python train_{algorithm}.py \\
     --checkpoint-freq {checkpoint_timesteps // 10} \\
     --eval-freq {eval_freq} \\
     {freeze_flag} \\
-    {reinit_flag}
+    {reinit_flag} \\
+    {seed_flag}
 
 EXIT_CODE=$?
 
@@ -277,6 +285,7 @@ def generate_phased_experiments_v2(
     cpus=4,
     gpus=1,
     venv_path=None,
+    base_seed=None,
 ):
     """
     Generate SLURM jobs for phased transfer learning (Version 2 - continuous source).
@@ -322,6 +331,12 @@ def generate_phased_experiments_v2(
     print(f"Checkpoints at: {', '.join(f'{x:,}' for x in checkpoint_intervals)}")
     print(f"Target training: {target_timesteps:,} timesteps per transfer\n")
 
+    # Seed assignment strategy: deterministic but unique per experiment
+    # If base_seed is provided, use it to generate unique seeds
+    # Format: base_seed + algorithm_index * 1000 + game_index * 100
+    algo_seed_offset = {algo: i * 1000 for i, algo in enumerate(algorithms)}
+    game_seed_offset = {game: i * 100 for i, game in enumerate(source_games + target_games)}
+
     # Generate scripts for each algorithm and source game
     for algorithm in algorithms:
         for source_game in source_games:
@@ -329,6 +344,11 @@ def generate_phased_experiments_v2(
             print("-" * 60)
 
             source_exp_dir = f"{output_dir}/{algorithm}_{source_game}_source"
+
+            # Calculate seed for source experiment
+            source_seed = None
+            if base_seed is not None:
+                source_seed = base_seed + algo_seed_offset[algorithm] + game_seed_offset[source_game]
 
             # Generate ONE continuous source training job
             source_job_name = f"{algorithm}_{source_game}_source"
@@ -348,6 +368,7 @@ def generate_phased_experiments_v2(
                 cpus=cpus,
                 gpus=gpus,
                 venv_path=venv_path,
+                seed=source_seed,
             )
 
             with open(source_script_path, "w") as f:
@@ -370,6 +391,13 @@ def generate_phased_experiments_v2(
                     if target_game == source_game:
                         continue  # Skip self-transfer
 
+                    # Calculate seed for transfer experiment
+                    transfer_seed = None
+                    if base_seed is not None:
+                        # Transfer seed = base + algo_offset + target_offset + checkpoint_offset
+                        checkpoint_idx = checkpoint_intervals.index(checkpoint_steps)
+                        transfer_seed = base_seed + algo_seed_offset[algorithm] + game_seed_offset[target_game] + checkpoint_idx
+
                     transfer_job_name = f"{algorithm}_{source_game}_to_{target_game}_ckpt{checkpoint_steps}"
                     transfer_script_path = os.path.join(scripts_dir, f"{transfer_job_name}.sh")
 
@@ -388,6 +416,7 @@ def generate_phased_experiments_v2(
                         reinit_head=reinit_head,
                         partition=partition,
                         time_limit=transfer_time_limit,
+                        seed=transfer_seed,
                         mem=mem,
                         cpus=cpus,
                         gpus=gpus,
@@ -465,6 +494,8 @@ if __name__ == "__main__":
     parser.add_argument("--cpus", type=int, default=None)
     parser.add_argument("--gpus", type=int, default=None)
     parser.add_argument("--venv-path", type=str, default=None)
+    parser.add_argument("--base-seed", type=int, default=None,
+                       help="Base random seed for reproducibility (unique seeds will be derived for each experiment)")
 
     args = parser.parse_args()
 
@@ -494,6 +525,8 @@ if __name__ == "__main__":
                 args.freeze_encoder = training_config.get("freeze_encoder", False)
             if not args.reinit_head:
                 args.reinit_head = training_config.get("reinit_head", True)
+            if args.base_seed is None:
+                args.base_seed = training_config.get("base_seed")
 
         if "slurm" in config:
             slurm_config = config["slurm"]
@@ -572,4 +605,5 @@ if __name__ == "__main__":
         cpus=args.cpus,
         gpus=args.gpus,
         venv_path=args.venv_path,
+        base_seed=args.base_seed,
     )

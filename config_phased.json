@@ -22,7 +22,8 @@
     "checkpoint_freq": 5000000,
     "eval_freq": 10000,
     "freeze_encoder": false,
-    "reinit_head": true
+    "reinit_head": true,
+    "base_seed": 42
   },
   "slurm": {
     "partition": "gpu",
