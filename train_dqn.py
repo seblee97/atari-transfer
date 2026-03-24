@@ -19,6 +19,22 @@ from stable_baselines3.common.save_util import load_from_zip_file
 gym.register_envs(ale_py)
 
 
+class RotateObservationWrapper(gym.ObservationWrapper):
+    """Rotate observation 90 degrees clockwise."""
+    def __init__(self, env):
+        super().__init__(env)
+        obs_shape = env.observation_space.shape
+        self.observation_space = gym.spaces.Box(
+            low=env.observation_space.low.reshape(obs_shape),
+            high=env.observation_space.high.reshape(obs_shape),
+            shape=obs_shape,
+            dtype=env.observation_space.dtype,
+        )
+
+    def observation(self, obs):
+        return np.rot90(obs, k=1).copy()
+
+
 def set_global_seeds(seed):
     """
     Set random seeds for reproducibility across all libraries.
@@ -34,10 +50,12 @@ def set_global_seeds(seed):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def make_atari_env(game_name, seed=None):
+def make_atari_env(game_name, seed=None, rotate=False):
     def _init():
         env = gym.make(f"ALE/{game_name}-v5", render_mode=None)
         env = AtariWrapper(env)
+        if rotate:
+            env = RotateObservationWrapper(env)
         if seed is not None:
             env.reset(seed=seed)
         return env
@@ -61,6 +79,7 @@ def train_dqn(
     freeze_encoder=False,
     reinit_head=False,
     seed=None,
+    rotate=False,
 ):
     os.makedirs(checkpoint_dir, exist_ok=True)
     os.makedirs(log_dir, exist_ok=True)
@@ -70,10 +89,10 @@ def train_dqn(
         print(f"Setting random seed: {seed}")
         set_global_seeds(seed)
 
-    env = DummyVecEnv([make_atari_env(game_name, seed=seed)])
+    env = DummyVecEnv([make_atari_env(game_name, seed=seed, rotate=rotate)])
     env = VecFrameStack(env, n_stack=4)
 
-    eval_env = DummyVecEnv([make_atari_env(game_name, seed=seed)])
+    eval_env = DummyVecEnv([make_atari_env(game_name, seed=seed, rotate=rotate)])
     eval_env = VecFrameStack(eval_env, n_stack=4)
 
     logger = configure(log_dir, ["stdout", "csv", "tensorboard"])
@@ -249,6 +268,7 @@ if __name__ == "__main__":
     parser.add_argument("--freeze-encoder", action="store_true", help="Freeze CNN encoder layers during transfer")
     parser.add_argument("--reinit-head", action="store_true", help="Reinitialize the final layer weights")
     parser.add_argument("--seed", type=int, default=None, help="Random seed for reproducibility")
+    parser.add_argument("--rotate", action="store_true", help="Rotate observations 90 degrees clockwise")
 
     args = parser.parse_args()
 
@@ -265,4 +285,5 @@ if __name__ == "__main__":
         freeze_encoder=args.freeze_encoder,
         reinit_head=args.reinit_head,
         seed=args.seed,
+        rotate=args.rotate,
     )

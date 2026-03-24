@@ -1,0 +1,29 @@
+{
+  "source_game": "SpaceInvaders",
+  "target_game": "Pong",
+  "algorithms": ["dqn", "ppo"],
+  "output_dir": "/mnt/home/slee1/ceph/atari_rotation_results",
+  "training": {
+    "source_timesteps": 10000000,
+    "target_timesteps": 10000000,
+    "eval_freq": 10000,
+    "freeze_encoder": false,
+    "reinit_head": true,
+    "seeds": [1, 2, 3]
+  },
+  "slurm": {
+    "partition": "gpu",
+    "source_time_limit": "1-00:00:00",
+    "transfer_time_limit": "1-00:00:00",
+    "mem": "32G",
+    "cpus": 4,
+    "gpus": 1,
+    "venv_path": "/mnt/home/slee1/venvs/atari-transfer"
+  },
+  "notes": {
+    "description": "Rotation transfer experiments: SpaceInvaders (10M) -> Pong",
+    "variant_A": "source_rotated: SpaceInvaders trained with 90-deg rotation, transfer to Pong (no rotation)",
+    "variant_B": "target_rotated: SpaceInvaders trained normally, transfer to Pong with 90-deg rotation",
+    "total_jobs": "2 algorithms x 2 variants x 3 seeds x 2 (source+transfer) = 24 jobs"
+  }
+}
