@@ -24,6 +24,7 @@ def create_source_script(
     game,
     total_timesteps,
     output_dir,
+    project_dir,
     rotate=False,
     eval_freq=10000,
     partition="gpu",
@@ -52,7 +53,7 @@ echo "Job started: $(date)"
 echo "Running on node: $(hostname)"
 echo "Job ID: $SLURM_JOB_ID"
 
-PROJECT_DIR=$SLURM_SUBMIT_DIR
+PROJECT_DIR={project_dir}
 cd $PROJECT_DIR
 """
 
@@ -106,6 +107,7 @@ def create_transfer_script(
     source_timesteps,
     target_timesteps,
     output_dir,
+    project_dir,
     dependency_var,
     rotate=False,
     freeze_encoder=False,
@@ -134,13 +136,13 @@ def create_transfer_script(
 #SBATCH --mem={mem}
 #SBATCH --cpus-per-task={cpus}
 #SBATCH --gres=gpu:{gpus}
-#SBATCH --dependency=after:{dependency_var}
+#SBATCH --dependency=afterok:{dependency_var}
 
 echo "Job started: $(date)"
 echo "Running on node: $(hostname)"
 echo "Job ID: $SLURM_JOB_ID"
 
-PROJECT_DIR=$SLURM_SUBMIT_DIR
+PROJECT_DIR={project_dir}
 cd $PROJECT_DIR
 """
 
@@ -225,6 +227,7 @@ def generate_rotation_experiments(config):
     reinit_head = config["training"].get("reinit_head", True)
     seeds = config["training"]["seeds"]
     output_dir = config["output_dir"]
+    project_dir = config["project_dir"]
 
     slurm = config["slurm"]
     partition = slurm.get("partition", "gpu")
@@ -278,6 +281,7 @@ def generate_rotation_experiments(config):
                     game=source_game,
                     total_timesteps=source_timesteps,
                     output_dir=output_dir,
+                    project_dir=project_dir,
                     rotate=src_rot,
                     eval_freq=eval_freq,
                     partition=partition,
@@ -310,6 +314,7 @@ def generate_rotation_experiments(config):
                     source_timesteps=source_timesteps,
                     target_timesteps=target_timesteps,
                     output_dir=output_dir,
+                    project_dir=project_dir,
                     dependency_var=f"${{{job_var}}}",
                     rotate=tgt_rot,
                     freeze_encoder=freeze_encoder,
@@ -330,7 +335,7 @@ def generate_rotation_experiments(config):
                 os.chmod(transfer_path, 0o755)
 
                 submit_commands.append(
-                    f"sbatch --dependency=after:${{{job_var}}} {transfer_path} >/dev/null"
+                    f"sbatch --dependency=afterok:${{{job_var}}} {transfer_path} >/dev/null"
                 )
 
                 rot_desc = "src_rot->tgt" if src_rot else "src->tgt_rot"

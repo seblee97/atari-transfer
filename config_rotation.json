@@ -3,6 +3,7 @@
   "target_game": "Pong",
   "algorithms": ["dqn", "ppo"],
   "output_dir": "/mnt/home/slee1/ceph/atari_rotation_results",
+  "project_dir": "/mnt/home/slee1/ceph/atari-transfer-rl",
   "training": {
     "source_timesteps": 10000000,
     "target_timesteps": 10000000,
